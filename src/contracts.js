@@ -1,20 +1,9 @@
-import { ethers } from "./lib/ethers.js";
+// deno-fmt-ignore-file
 
-function buildPath(file) {
-  return `contracts/build/${file}`;
-}
+import _AnyoneAuthenticator from "../contracts/build/AnyoneAuthenticator.json" assert { type: "json" };
+import _PhonyERC20 from "../contracts/build/PhonyERC20.json" assert { type: "json" };
+import _Trader from "../contracts/build/Trader.json" assert { type: "json" };
 
-export function load(name) {
-  const abi = JSON.parse(Deno.readTextFileSync(buildPath(`${name}.abi`)));
-  const bin = `0x${Deno.readTextFileSync(buildPath(`${name}.bin-runtime`))}`;
-
-  const contract = new ethers.utils.Interface(abi);
-  contract.bin = bin;
-
-  return contract;
-}
-
-export function loadSettlement() {
-  const abi = JSON.parse(Deno.readTextFileSync(buildPath("ISettlement.abi")));
-  return new ethers.Contract("0x9008D19f58AAbD9eD0D60971565AA8510560ab41", abi);
-}
+export const AnyoneAuthenticator = _AnyoneAuthenticator;
+export const PhonyERC20 = _PhonyERC20;
+export const Trader = _Trader;

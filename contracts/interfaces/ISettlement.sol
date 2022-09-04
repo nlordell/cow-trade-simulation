@@ -1,11 +1,26 @@
 // SPDX-License-Identifier: MIT
-pragma solidity =0.8.16;
+pragma solidity ^0.8.16;
 
-import { Interaction } from "../libraries/Interaction.sol";
-import { Trade } from "../libraries/Trade.sol";
+ISettlement constant SETTLEMENT = ISettlement(0x9008D19f58AAbD9eD0D60971565AA8510560ab41);
 
-function settlement() pure returns (ISettlement) {
-    return ISettlement(0x9008D19f58AAbD9eD0D60971565AA8510560ab41);
+struct Interaction {
+    address target;
+    uint256 value;
+    bytes callData;
+}
+
+struct Trade {
+    uint256 sellTokenIndex;
+    uint256 buyTokenIndex;
+    address receiver;
+    uint256 sellAmount;
+    uint256 buyAmount;
+    uint32 validTo;
+    bytes32 appData;
+    uint256 feeAmount;
+    uint256 flags;
+    uint256 executedAmount;
+    bytes signature;
 }
 
 interface ISettlement {
@@ -16,7 +31,7 @@ interface ISettlement {
     function settle(
         address[] calldata tokens,
         uint256[] calldata clearingPrices,
-        Trade.Data[] calldata trades,
-        Interaction.Data[][3] calldata interactions
+        Trade[] calldata trades,
+        Interaction[][3] calldata interactions
     ) external;
 }

@@ -1,145 +1,95 @@
 // SPDX-License-Identifier: MIT
-pragma solidity =0.8.16;
+pragma solidity ^0.8.16;
 
-import { Dummy } from "./Dummy.sol";
-import { IERC20 } from "./interfaces/IERC20.sol";
-import { settlement } from "./interfaces/ISettlement.sol";
-import { Assertions } from "./libraries/Assertions.sol";
-import { Interaction } from "./libraries/Interaction.sol";
-import { Order } from "./libraries/Order.sol";
-import { Trade } from "./libraries/Trade.sol";
+import { IMintableERC20, IERC20 } from "./interfaces/IERC20.sol";
+import { Interaction, Trade, SETTLEMENT } from "./interfaces/ISettlement.sol";
+import { Caller } from "./libraries/Caller.sol";
+import { SafeERC20 } from "./libraries/SafeERC20.sol";
 
 contract Trader {
-    using Order for Order.Data;
+    using Caller for address;
+    using SafeERC20 for IERC20;
 
-    struct Context {
-        address token;
-        address pool;
+    function trade(
+        IERC20 tokenIn,
+        IERC20 tokenOut,
+        uint256 mint,
+        address spender,
+        address exchange,
+        bytes calldata cdata
+    ) external returns (
+        uint256 gasUsed,
+        uint256 executedIn,
+        uint256 executedOut
+    ) {
+        if (mint != 0) {
+            IMintableERC20(address(tokenIn)).mint(address(this), mint);
+        }
+
+        uint256 balanceIn = tokenIn.balanceOf(address(this));
+        uint256 balanceOut = tokenOut.balanceOf(address(this));
+
+        if (spender != address(0)) {
+            tokenIn.safeApprove(spender, type(uint256).max);
+        }
+
+        gasUsed = exchange.doMeteredCallNoReturn(cdata);
+
+        executedIn = balanceIn - tokenIn.balanceOf(address(this));
+        executedOut = tokenOut.balanceOf(address(this)) - balanceOut;
     }
 
-    function execute(address token, uint256 amount, Context memory dummy) external returns (bytes4) {
-        uint256 balance = IERC20(token).balanceOf(address(this));
+    function settle(
+        address[] calldata tokens,
+        uint256[] calldata clearingPrices,
+        Interaction[][3] calldata interactions,
+        uint256 mint
+    ) external returns (
+        uint256 gasUsed,
+        int256[] memory traderBalances,
+        int256[] memory settlementBalances
+    ) {
+        if (mint != 0) {
+            IMintableERC20(tokens[0]).mint(address(this), mint);
+        }
+        IERC20(tokens[0]).safeApprove(address(SETTLEMENT), type(uint256).max);
 
-        // swap from token to dummy
-        {
-            Order.Data memory order = Order.Data({
-                sellToken: token,
-                buyToken: dummy.token,
-                receiver: address(0),
-                sellAmount: amount,
-                buyAmount: 1,
-                validTo: type(uint32).max,
-                appData: bytes32(0),
-                feeAmount: 0,
-                kind: Order.KIND_SELL,
-                partiallyFillable: false,
-                sellTokenBalance: Order.BALANCE_ERC20,
-                buyTokenBalance: Order.BALANCE_ERC20
-            });
-
-            address[] memory tokens = new address[](2);
-            tokens[0] = token;
-            tokens[1] = dummy.token;
-
-            uint256[] memory prices = new uint256[](2);
-            prices[0] = 1 ether;
-            prices[1] = amount;
-
-            Trade.Data[] memory trades = new Trade.Data[](1);
-            trades[0] = Trade.Data({
-                sellTokenIndex: 0,
-                buyTokenIndex: 1,
-                receiver: address(0),
-                sellAmount: amount,
-                buyAmount: 1,
-                validTo: type(uint32).max,
-                appData: bytes32(0),
-                feeAmount: 0,
-                flags: 0x60,
-                executedAmount: 0,
-                signature: abi.encodePacked(address(this))
-            });
-
-            Interaction.Data[][3] memory interactions;
-            uint256 buffer = IERC20(token).balanceOf(address(settlement()));
-            if (balance > 0) {
-                interactions[0] = new Interaction.Data[](1);
-                interactions[0][0] = Interaction.Data({
-                    target: token,
-                    value: 0,
-                    callData: abi.encodeWithSelector(IERC20.transfer.selector, dummy.pool, buffer)
-                });
-            }
-            interactions[1] = new Interaction.Data[](2);
-            interactions[1][0] = Interaction.Data({
-                target: token,
-                value: 0,
-                callData: abi.encodeWithSelector(IERC20.approve.selector, dummy.pool, type(uint256).max)
-            });
-            interactions[1][1] = Interaction.Data({
-                target: dummy.pool,
-                value: 0,
-                callData: abi.encodeWithSelector(Dummy.swapFrom.selector, token, amount)
-            });
-
-            IERC20(token).approve(address(settlement().vaultRelayer()), type(uint256).max);
-            settlement().setPreSignature(order.uid(address(this)), true);
-            settlement().settle(tokens, prices, trades, interactions);
+        traderBalances = new int256[](tokens.length);
+        settlementBalances = new int256[](tokens.length);
+        for (uint256 i; i < tokens.length; ++i) {
+            traderBalances[i] = -int256(IERC20(tokens[i]).balanceOf(address(this)));
+            settlementBalances[i] = -int256(IERC20(tokens[i]).balanceOf(address(SETTLEMENT)));
         }
 
-        // swap to token from dummy
-        {
-            Order.Data memory order = Order.Data({
-                sellToken: dummy.token,
-                buyToken: token,
-                receiver: address(0),
-                sellAmount: type(uint128).max,
-                buyAmount: amount,
-                validTo: type(uint32).max,
-                appData: bytes32(0),
-                feeAmount: 0,
-                kind: Order.KIND_BUY,
-                partiallyFillable: false,
-                sellTokenBalance: Order.BALANCE_ERC20,
-                buyTokenBalance: Order.BALANCE_ERC20
-            });
+        Trade[] memory trades = new Trade[](1);
+        trades[0] = Trade({
+            sellTokenIndex: 0,
+            buyTokenIndex: tokens.length - 1,
+            receiver: address(0),
+            sellAmount: clearingPrices[tokens.length - 1],
+            buyAmount: clearingPrices[0],
+            validTo: type(uint32).max,
+            appData: bytes32(0),
+            feeAmount: 0,
+            flags: 0x40,
+            executedAmount: 0,
+            signature: abi.encodePacked(address(this))
+        });
 
-            address[] memory tokens = new address[](2);
-            tokens[0] = dummy.token;
-            tokens[1] = token;
+        gasUsed = address(SETTLEMENT).doMeteredCallNoReturn(
+            abi.encodeCall(
+                SETTLEMENT.settle,
+                (tokens, clearingPrices, trades, interactions)
+            )
+        );
 
-            uint256[] memory prices = new uint256[](2);
-            prices[0] = amount;
-            prices[1] = 1 ether;
-
-            Trade.Data[] memory trades = new Trade.Data[](1);
-            trades[0] = Trade.Data({
-                sellTokenIndex: 0,
-                buyTokenIndex: 1,
-                receiver: address(0),
-                sellAmount: type(uint128).max,
-                buyAmount: amount,
-                validTo: type(uint32).max,
-                appData: bytes32(0),
-                feeAmount: 0,
-                flags: 0x61,
-                executedAmount: 0,
-                signature: abi.encodePacked(address(this))
-            });
-
-            Interaction.Data[][3] memory interactions;
-            interactions[1] = new Interaction.Data[](1);
-            interactions[1][0] = Interaction.Data({
-                target: dummy.pool,
-                value: 0,
-                callData: abi.encodeWithSelector(Dummy.swapTo.selector, token, amount)
-            });
-
-            settlement().setPreSignature(order.uid(address(this)), true);
-            settlement().settle(tokens, prices, trades, interactions);
+        for (uint256 i; i < tokens.length; ++i) {
+            traderBalances[i] += int256(IERC20(tokens[i]).balanceOf(address(this)));
+            settlementBalances[i] += int256(IERC20(tokens[i]).balanceOf(address(SETTLEMENT)));
         }
+    }
 
-        Assertions.balanceConservation(token, balance);
-        return this.execute.selector;
+    function isValidSignature(bytes32, bytes calldata) external pure returns (bytes4) {
+        return 0x1626ba7e;
     }
 }
