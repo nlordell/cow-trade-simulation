@@ -21,8 +21,7 @@ const usdc = new ethers.Contract(
 
 const uniswapRouter = new ethers.Contract(
   "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D",
-  [
-    `
+  [`
     function swapExactTokensForTokens(
         uint amountIn,
         uint amountOutMin,
@@ -30,17 +29,7 @@ const uniswapRouter = new ethers.Contract(
         address to,
         uint deadline
     ) returns (uint[] memory amounts)
-    `,
-    `
-    function swapTokensForExactTokens(
-      uint amountOut,
-      uint amountInMax,
-      address[] calldata path,
-      address to,
-      uint deadline
-    ) returns (uint[] memory amounts)
-    `,
-  ],
+  `],
   provider,
 );
 
@@ -69,6 +58,8 @@ async function call(request, overrides, returnTypes) {
 function fu(amount, decimals = 18) {
   return ethers.utils.formatUnits(amount, decimals);
 }
+
+/* Simulate trade individually */
 
 const [tradeGas, executedIn, executedOut] = await call(
   {
@@ -104,6 +95,8 @@ const [tradeGas, executedIn, executedOut] = await call(
 
 console.log(`trade used ${tradeGas} gas units`);
 console.log(`${fu(executedIn, 6)} USDC -> ${fu(executedOut)} WETH`);
+
+/* Simulate trade in settlement */
 
 const [
   settlementGas,
