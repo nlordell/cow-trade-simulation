@@ -1,0 +1,171 @@
+import { ethers } from "./lib/ethers.js";
+import { AnyoneAuthenticator, PhonyERC20, Trader } from "./contracts.js";
+
+export const SETTLEMENT = new ethers.Contract(
+  "0x9008D19f58AAbD9eD0D60971565AA8510560ab41",
+  [`function authenticator() view returns (address)`],
+);
+
+const TRADER = new ethers.utils.Interface(Trader.abi);
+
+const ERC20 = new ethers.utils.Interface(
+  [`function approve(address, uint256) returns (bool)`],
+);
+
+async function call(provider, request, overrides, returnTypes) {
+  const result = await provider
+    .send("eth_call", [request, "latest", overrides])
+    .catch((err) => {
+      const { error: { message } } = JSON.parse(err.body);
+      throw new Error(message.replace(/^execution reverted: /, ""));
+    });
+  return ethers.utils.defaultAbiCoder.decode(returnTypes, result);
+}
+
+async function phonyTokenOverrides(provider, token, mint) {
+  return ethers.BigNumber.from(mint ?? 0).gt(0)
+    ? {
+      [token]: {
+        code: `0x${PhonyERC20["bin-runtime"]}`,
+      },
+      ["0x0000000000000000000000000000000000010000"]: {
+        code: await provider.getCode(token),
+      },
+    }
+    : {};
+}
+
+export async function simulateTrade(
+  provider,
+  {
+    trader,
+    tokenIn,
+    tokenOut,
+    mint,
+    spender,
+    exchange,
+    data,
+  },
+) {
+  const [gasUsed, balanceIn, balanceOut] = await call(
+    provider,
+    {
+      from: trader,
+      to: trader,
+      data: TRADER.encodeFunctionData("trade", [
+        tokenIn,
+        tokenOut,
+        mint ?? 0,
+        spender,
+        exchange,
+        data,
+      ]),
+    },
+    {
+      [trader]: {
+        code: `0x${Trader["bin-runtime"]}`,
+      },
+      ...await phonyTokenOverrides(provider, tokenIn, mint),
+    },
+    ["uint256", "int256", "int256"],
+  );
+
+  return { gasUsed, balanceIn, balanceOut };
+}
+
+export async function simulateSettlementTrade(
+  provider,
+  {
+    trader,
+    tokenIn,
+    tokenOut,
+    amountIn,
+    amountOut,
+    mint,
+    spender,
+    exchange,
+    data,
+  },
+) {
+  const {
+    gasUsed,
+    traderBalances,
+    settlementBalances,
+  } = await simulateSettlement(
+    provider,
+    {
+      trader,
+      tokens: [tokenIn, tokenOut],
+      clearingPrices: [amountOut, amountIn],
+      interactions: [
+        [],
+        [
+          {
+            target: tokenIn,
+            value: 0,
+            callData: ERC20.encodeFunctionData("approve", [
+              spender,
+              ethers.constants.MaxUint256,
+            ]),
+          },
+          {
+            target: exchange,
+            value: 0,
+            callData: data,
+          },
+        ],
+        [],
+      ],
+      mint,
+    },
+  );
+
+  return {
+    gasUsed,
+    trader: {
+      balanceIn: traderBalances[0],
+      balanceOut: traderBalances[1],
+    },
+    settlement: {
+      balanceIn: settlementBalances[0],
+      balanceOut: settlementBalances[1],
+    },
+  };
+}
+
+export async function simulateSettlement(
+  provider,
+  {
+    trader,
+    tokens,
+    clearingPrices,
+    interactions,
+    mint,
+  },
+) {
+  const [gasUsed, traderBalances, settlementBalances] = await call(
+    provider,
+    {
+      from: trader,
+      to: trader,
+      data: TRADER.encodeFunctionData("settle", [
+        tokens,
+        clearingPrices,
+        interactions,
+        mint ?? 0,
+      ]),
+    },
+    {
+      [trader]: {
+        code: `0x${Trader["bin-runtime"]}`,
+      },
+      [await SETTLEMENT.connect(provider).authenticator()]: {
+        code: `0x${AnyoneAuthenticator["bin-runtime"]}`,
+      },
+      ...await phonyTokenOverrides(provider, tokens[0], mint),
+    },
+    ["uint256", "int256[]", "int256[]"],
+  );
+
+  return { gasUsed, traderBalances, settlementBalances };
+}

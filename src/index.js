@@ -1,5 +1,9 @@
 import { ethers } from "./lib/ethers.js";
-import { AnyoneAuthenticator, PhonyERC20, Trader } from "./contracts.js";
+import {
+  SETTLEMENT,
+  simulateSettlementTrade,
+  simulateTrade,
+} from "./simulation.js";
 
 const provider = new ethers.providers.JsonRpcProvider(
   `https://mainnet.infura.io/v3/${Deno.env.get("INFURA_PROJECT_ID")}`,
@@ -12,10 +16,7 @@ const weth = new ethers.Contract(
 );
 const usdc = new ethers.Contract(
   "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
-  [
-    ...PhonyERC20.abi,
-    `function approve(address, uint256) returns (bool)`,
-  ],
+  [`function balanceOf(address) view returns (uint256)`],
   provider,
 );
 
@@ -33,131 +34,91 @@ const uniswapRouter = new ethers.Contract(
   provider,
 );
 
-const settlement = new ethers.Contract(
-  "0x9008D19f58AAbD9eD0D60971565AA8510560ab41",
-  [`function authenticator() view returns (address)`],
-  provider,
-);
-
-const trader = new ethers.Contract(
-  "0x9A204e02DAdD8f5A89FC37E6F7627789615824Eb",
-  Trader.abi,
-  provider,
-);
-
-async function call(request, overrides, returnTypes) {
-  const result = await provider
-    .send("eth_call", [request, "latest", overrides])
-    .catch((err) => {
-      const { error: { message } } = JSON.parse(err.body);
-      throw new Error(message.replace(/^execution reverted: /, ""));
-    });
-  return ethers.utils.defaultAbiCoder.decode(returnTypes, result);
-}
-
 function fu(amount, decimals = 18) {
   return ethers.utils.formatUnits(amount, decimals);
 }
 
-/* Simulate trade individually */
+for (
+  const trader of [
+    "0x9A204e02DAdD8f5A89FC37E6F7627789615824Eb",
+    "0xA1cb7762F40318ee0260F53e15De835fF001cb7E",
+  ]
+) {
+  console.log(`### TRADING WITH ${trader} ###`);
+  const usdcIn = ethers.utils.parseUnits("1000.0", 6);
+  const usdcBalance = await usdc.balanceOf(trader);
+  const mint = usdcIn.gt(usdcBalance) ? usdcIn.sub(usdcBalance) : 0;
 
-const [tradeGas, executedIn, executedOut] = await call(
-  {
-    to: trader.address,
-    data: trader.interface.encodeFunctionData("trade", [
-      usdc.address,
-      weth.address,
-      ethers.utils.parseUnits("1000.0", 6),
-      uniswapRouter.address,
-      uniswapRouter.address,
-      uniswapRouter.interface.encodeFunctionData("swapExactTokensForTokens", [
-        ethers.utils.parseUnits("1000.0", 6),
-        ethers.constants.Zero,
-        [usdc.address, weth.address],
-        trader.address,
-        ethers.constants.MaxUint256,
-      ]),
-    ]),
-  },
-  {
-    [trader.address]: {
-      code: `0x${Trader["bin-runtime"]}`,
-    },
-    [usdc.address]: {
-      code: `0x${PhonyERC20["bin-runtime"]}`,
-    },
-    ["0x0000000000000000000000000000000000010000"]: {
-      code: await provider.getCode(usdc.address),
-    },
-  },
-  ["uint256", "uint256", "uint256"],
-);
+  console.log(`==> minting ${fu(mint, 6)} phonyUSDC`);
 
-console.log(`trade used ${tradeGas} gas units`);
-console.log(`${fu(executedIn, 6)} USDC -> ${fu(executedOut)} WETH`);
-
-/* Simulate trade in settlement */
-
-const [
-  settlementGas,
-  [traderIn, traderOut],
-  [settlementIn, settlementOut],
-] = await call(
-  {
-    to: trader.address,
-    data: trader.interface.encodeFunctionData("settle", [
-      [usdc.address, weth.address],
-      [executedOut, executedIn],
-      [
-        [],
+  const {
+    gasUsed: tradeGas,
+    balanceIn,
+    balanceOut,
+  } = await simulateTrade(
+    provider,
+    {
+      trader,
+      tokenIn: usdc.address,
+      tokenOut: weth.address,
+      mint,
+      spender: uniswapRouter.address,
+      exchange: uniswapRouter.address,
+      data: uniswapRouter.interface.encodeFunctionData(
+        "swapExactTokensForTokens",
         [
-          {
-            target: usdc.address,
-            value: 0,
-            callData: usdc.interface.encodeFunctionData("approve", [
-              settlement.address,
-              ethers.constants.MaxUint256,
-            ]),
-          },
-          {
-            target: uniswapRouter.address,
-            value: 0,
-            callData: uniswapRouter.interface.encodeFunctionData(
-              "swapExactTokensForTokens",
-              [
-                executedIn,
-                ethers.constants.Zero,
-                [usdc.address, weth.address],
-                settlement.address,
-                ethers.constants.MaxUint256,
-              ],
-            ),
-          },
+          usdcIn,
+          ethers.constants.Zero,
+          [usdc.address, weth.address],
+          trader,
+          ethers.constants.MaxUint256,
         ],
-        [],
-      ],
-      executedIn,
-    ]),
-  },
-  {
-    [trader.address]: {
-      code: `0x${Trader["bin-runtime"]}`,
+      ),
     },
-    [usdc.address]: {
-      code: `0x${PhonyERC20["bin-runtime"]}`,
-    },
-    ["0x0000000000000000000000000000000000010000"]: {
-      code: await provider.getCode(usdc.address),
-    },
-    [await settlement.authenticator()]: {
-      code: `0x${AnyoneAuthenticator["bin-runtime"]}`,
-    },
-  },
-  ["uint256", "int256[]", "int256[]"],
-);
+  );
 
-console.log(`settlement used ${settlementGas} gas units`);
-console.table({
-  trader: { sell: fu(traderIn, 6), buy: fu(traderOut) },
-  settlement: { sell: fu(settlementIn, 6), buy: fu(settlementOut) },
-});
+  console.log(`trade used ${tradeGas} gas units`);
+  console.table({
+    trader: { sell: fu(balanceIn, 6), buy: fu(balanceOut) },
+  });
+
+  const {
+    gasUsed: settlementGas,
+    trader: {
+      balanceIn: traderIn,
+      balanceOut: traderOut,
+    },
+    settlement: {
+      balanceIn: settlementIn,
+      balanceOut: settlementOut,
+    },
+  } = await simulateSettlementTrade(
+    provider,
+    {
+      trader,
+      tokenIn: usdc.address,
+      tokenOut: weth.address,
+      amountIn: usdcIn,
+      amountOut: balanceOut,
+      mint,
+      spender: uniswapRouter.address,
+      exchange: uniswapRouter.address,
+      data: uniswapRouter.interface.encodeFunctionData(
+        "swapExactTokensForTokens",
+        [
+          ethers.utils.parseUnits("1000.0", 6),
+          ethers.constants.Zero,
+          [usdc.address, weth.address],
+          SETTLEMENT.address,
+          ethers.constants.MaxUint256,
+        ],
+      ),
+    },
+  );
+
+  console.log(`settlement used ${settlementGas} gas units`);
+  console.table({
+    trader: { sell: fu(traderIn, 6), buy: fu(traderOut) },
+    settlement: { sell: fu(settlementIn, 6), buy: fu(settlementOut) },
+  });
+}

@@ -19,15 +19,15 @@ contract Trader {
         bytes calldata cdata
     ) external returns (
         uint256 gasUsed,
-        uint256 executedIn,
-        uint256 executedOut
+        int256 balanceIn,
+        int256 balanceOut
     ) {
         if (mint != 0) {
             IMintableERC20(address(tokenIn)).mint(address(this), mint);
         }
 
-        uint256 balanceIn = tokenIn.balanceOf(address(this));
-        uint256 balanceOut = tokenOut.balanceOf(address(this));
+        balanceIn = -int256(tokenIn.balanceOf(address(this)));
+        balanceOut = -int256(tokenOut.balanceOf(address(this)));
 
         if (spender != address(0)) {
             tokenIn.safeApprove(spender, type(uint256).max);
@@ -35,8 +35,8 @@ contract Trader {
 
         gasUsed = exchange.doMeteredCallNoReturn(cdata);
 
-        executedIn = balanceIn - tokenIn.balanceOf(address(this));
-        executedOut = tokenOut.balanceOf(address(this)) - balanceOut;
+        balanceIn += int256(tokenIn.balanceOf(address(this)));
+        balanceOut += int256(tokenOut.balanceOf(address(this)));
     }
 
     function settle(
@@ -52,7 +52,7 @@ contract Trader {
         if (mint != 0) {
             IMintableERC20(tokens[0]).mint(address(this), mint);
         }
-        IERC20(tokens[0]).safeApprove(address(SETTLEMENT), type(uint256).max);
+        IERC20(tokens[0]).safeApprove(address(SETTLEMENT.vaultRelayer()), type(uint256).max);
 
         traderBalances = new int256[](tokens.length);
         settlementBalances = new int256[](tokens.length);
