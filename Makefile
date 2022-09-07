@@ -21,3 +21,6 @@ contracts/build/%.json: contracts/%.sol
 	cat contracts/combined.json | jq '.contracts["$*.sol:$*"]' > $@
 	rm -f contracts/combined.json
 
+.PHONY: fmt
+fmt:
+	deno fmt src/
