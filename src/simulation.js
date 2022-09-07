@@ -35,16 +35,37 @@ async function phonyTokenOverrides(provider, token, mint) {
     : {};
 }
 
+function directTradeInteractions({
+  tokenIn,
+  spender,
+  exchange,
+  data,
+}) {
+  return [
+    [{
+      target: tokenIn,
+      value: 0,
+      callData: ERC20.encodeFunctionData("approve", [
+        spender,
+        ethers.constants.MaxUint256,
+      ]),
+    }],
+    [{
+      target: exchange,
+      value: 0,
+      callData: data,
+    }],
+  ];
+}
+
 export async function simulateTrade(
   provider,
   {
     trader,
     tokenIn,
     tokenOut,
+    interactions,
     mint,
-    spender,
-    exchange,
-    data,
   },
 ) {
   const [gasUsed, balanceIn, balanceOut] = await call(
@@ -55,10 +76,8 @@ export async function simulateTrade(
       data: TRADER.encodeFunctionData("trade", [
         tokenIn,
         tokenOut,
+        interactions,
         mint ?? 0,
-        spender,
-        exchange,
-        data,
       ]),
     },
     {
@@ -71,66 +90,6 @@ export async function simulateTrade(
   );
 
   return { gasUsed, balanceIn, balanceOut };
-}
-
-export async function simulateSettlementTrade(
-  provider,
-  {
-    trader,
-    tokenIn,
-    tokenOut,
-    amountIn,
-    amountOut,
-    mint,
-    spender,
-    exchange,
-    data,
-  },
-) {
-  const {
-    gasUsed,
-    traderBalances,
-    settlementBalances,
-  } = await simulateSettlement(
-    provider,
-    {
-      trader,
-      tokens: [tokenIn, tokenOut],
-      clearingPrices: [amountOut, amountIn],
-      interactions: [
-        [],
-        [
-          {
-            target: tokenIn,
-            value: 0,
-            callData: ERC20.encodeFunctionData("approve", [
-              spender,
-              ethers.constants.MaxUint256,
-            ]),
-          },
-          {
-            target: exchange,
-            value: 0,
-            callData: data,
-          },
-        ],
-        [],
-      ],
-      mint,
-    },
-  );
-
-  return {
-    gasUsed,
-    trader: {
-      balanceIn: traderBalances[0],
-      balanceOut: traderBalances[1],
-    },
-    settlement: {
-      balanceIn: settlementBalances[0],
-      balanceOut: settlementBalances[1],
-    },
-  };
 }
 
 export async function simulateSettlement(
@@ -168,4 +127,83 @@ export async function simulateSettlement(
   );
 
   return { gasUsed, traderBalances, settlementBalances };
+}
+
+export async function simulateDirectTrade(
+  provider,
+  {
+    trader,
+    tokenIn,
+    tokenOut,
+    mint,
+    spender,
+    exchange,
+    data,
+  },
+) {
+  return await simulateTrade(
+    provider,
+    {
+      trader,
+      tokenIn,
+      tokenOut,
+      interactions: directTradeInteractions({
+        tokenIn,
+        spender,
+        exchange,
+        data,
+      }),
+      mint,
+    },
+  );
+}
+
+export async function simulateDirectTradeSettlement(
+  provider,
+  {
+    trader,
+    tokenIn,
+    tokenOut,
+    amountIn,
+    amountOut,
+    mint,
+    spender,
+    exchange,
+    data,
+  },
+) {
+  const {
+    gasUsed,
+    traderBalances,
+    settlementBalances,
+  } = await simulateSettlement(
+    provider,
+    {
+      trader,
+      tokens: [tokenIn, tokenOut],
+      clearingPrices: [amountOut, amountIn],
+      interactions: [
+        ...directTradeInteractions({
+          tokenIn,
+          spender,
+          exchange,
+          data,
+        }),
+        [],
+      ],
+      mint,
+    },
+  );
+
+  return {
+    gasUsed,
+    trader: {
+      balanceIn: traderBalances[0],
+      balanceOut: traderBalances[1],
+    },
+    settlement: {
+      balanceIn: settlementBalances[0],
+      balanceOut: settlementBalances[1],
+    },
+  };
 }

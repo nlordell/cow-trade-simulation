@@ -7,16 +7,14 @@ import { Caller } from "./libraries/Caller.sol";
 import { SafeERC20 } from "./libraries/SafeERC20.sol";
 
 contract Trader {
-    using Caller for address;
-    using SafeERC20 for IERC20;
+    using Caller for *;
+    using SafeERC20 for *;
 
     function trade(
         IERC20 tokenIn,
         IERC20 tokenOut,
-        uint256 mint,
-        address spender,
-        address exchange,
-        bytes calldata cdata
+        Interaction[][2] calldata interactions,
+        uint256 mint
     ) external returns (
         uint256 gasUsed,
         int256 balanceIn,
@@ -25,15 +23,12 @@ contract Trader {
         if (mint != 0) {
             IMintableERC20(address(tokenIn)).mint(address(this), mint);
         }
+        interactions[0].executeMany();
 
         balanceIn = -int256(tokenIn.balanceOf(address(this)));
         balanceOut = -int256(tokenOut.balanceOf(address(this)));
 
-        if (spender != address(0)) {
-            tokenIn.safeApprove(spender, type(uint256).max);
-        }
-
-        gasUsed = exchange.doMeteredCallNoReturn(cdata);
+        gasUsed = interactions[1].executeManyMetered();
 
         balanceIn += int256(tokenIn.balanceOf(address(this)));
         balanceOut += int256(tokenOut.balanceOf(address(this)));

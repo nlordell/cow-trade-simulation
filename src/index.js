@@ -1,8 +1,8 @@
 import { ethers } from "./lib/ethers.js";
 import {
   SETTLEMENT,
-  simulateSettlementTrade,
-  simulateTrade,
+  simulateDirectTrade,
+  simulateDirectTradeSettlement,
 } from "./simulation.js";
 
 const provider = new ethers.providers.JsonRpcProvider(
@@ -55,7 +55,7 @@ for (
     gasUsed: tradeGas,
     balanceIn,
     balanceOut,
-  } = await simulateTrade(
+  } = await simulateDirectTrade(
     provider,
     {
       trader,
@@ -92,7 +92,7 @@ for (
       balanceIn: settlementIn,
       balanceOut: settlementOut,
     },
-  } = await simulateSettlementTrade(
+  } = await simulateDirectTradeSettlement(
     provider,
     {
       trader,
