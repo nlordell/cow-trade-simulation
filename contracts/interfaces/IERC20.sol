@@ -13,3 +13,7 @@ interface IERC20 {
 interface IMintableERC20 is IERC20 {
     function mint(address, uint256) external returns (bool);
 }
+
+interface INativeERC20 is IERC20 {
+    function deposit() external payable;
+}

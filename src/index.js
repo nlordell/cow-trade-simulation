@@ -26,7 +26,7 @@ const uniswapRouter = new ethers.Contract(
     function swapExactTokensForTokens(
         uint amountIn,
         uint amountOutMin,
-        address[] calldata path,
+        address[] path,
         address to,
         uint deadline
     ) returns (uint[] memory amounts)

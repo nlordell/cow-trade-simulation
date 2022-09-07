@@ -129,6 +129,44 @@ export async function simulateSettlement(
   return { gasUsed, traderBalances, settlementBalances };
 }
 
+export async function simulateRoundtrip(
+  provider,
+  {
+    trader,
+    native,
+    token,
+    amountNative,
+    amountToken,
+    native2token,
+    token2native,
+  },
+) {
+  await call(
+    provider,
+    {
+      from: trader,
+      to: trader,
+      data: TRADER.encodeFunctionData("roundtrip", [
+        native,
+        token,
+        amountToken,
+        native2token,
+        token2native,
+      ]),
+    },
+    {
+      [trader]: {
+        code: `0x${Trader["bin-runtime"]}`,
+        balance: ethers.BigNumber.from(amountNative).toHexString(),
+      },
+      [await SETTLEMENT.connect(provider).authenticator()]: {
+        code: `0x${AnyoneAuthenticator["bin-runtime"]}`,
+      },
+    },
+    ["uint256", "int256[]", "int256[]"],
+  );
+}
+
 export async function simulateDirectTrade(
   provider,
   {
