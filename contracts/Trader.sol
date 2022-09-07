@@ -132,8 +132,8 @@ contract Trader {
 
         {
             uint256[] memory clearingPrices = new uint256[](2);
-            clearingPrices[0] = 0;
-            clearingPrices[1] = amountNative;
+            clearingPrices[0] = amountToken;
+            clearingPrices[1] = 0;
 
             Trade[] memory trades = new Trade[](1);
             trades[0] = Trade({

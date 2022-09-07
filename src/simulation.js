@@ -157,13 +157,15 @@ export async function simulateRoundtrip(
     {
       [trader]: {
         code: `0x${Trader["bin-runtime"]}`,
-        balance: ethers.BigNumber.from(amountNative).toHexString(),
+        balance: ethers.BigNumber.from(amountNative)
+          .toHexString()
+          .replace(/^0x0*/, "0x"),
       },
       [await SETTLEMENT.connect(provider).authenticator()]: {
         code: `0x${AnyoneAuthenticator["bin-runtime"]}`,
       },
     },
-    ["uint256", "int256[]", "int256[]"],
+    [],
   );
 }
 
@@ -244,4 +246,42 @@ export async function simulateDirectTradeSettlement(
       balanceOut: settlementBalances[1],
     },
   };
+}
+
+export async function simulateDirectTradeRoundtrip(
+  provider,
+  {
+    trader,
+    native,
+    token,
+    amountNative,
+    amountToken,
+    native2token,
+    token2native,
+  },
+) {
+  await simulateRoundtrip(
+    provider,
+    {
+      trader,
+      native,
+      token,
+      amountNative,
+      amountToken,
+      native2token: [
+        ...directTradeInteractions({
+          tokenIn: native,
+          ...native2token,
+        }),
+        [],
+      ],
+      token2native: [
+        ...directTradeInteractions({
+          tokenIn: token,
+          ...token2native,
+        }),
+        [],
+      ],
+    },
+  );
 }
