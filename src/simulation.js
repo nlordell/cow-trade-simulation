@@ -12,7 +12,33 @@ const ERC20 = new ethers.utils.Interface(
   [`function approve(address, uint256) returns (bool)`],
 );
 
+function quantity(amount) {
+  return ethers.BigNumber.from(amount)
+    .toHexString()
+    .replace(/^0x0*/, "0x");
+}
+
 async function call(provider, request, overrides, returnTypes) {
+  // Uncomment to get JSON data for Tenderly simulation.
+  /*
+  console.log(
+    JSON.stringify(
+      {
+        network_id: "1",
+        from: request.from,
+        to: request.to,
+        input: request.data,
+        gas: 10e6,
+        state_objects: overrides,
+        save: true,
+        save_if_fails: true,
+      },
+      undefined,
+      "  ",
+    ),
+  );
+  */
+
   const result = await provider
     .send("eth_call", [request, "latest", overrides])
     .catch((err) => {
@@ -140,7 +166,12 @@ export async function simulateRoundtrip(
     native2token,
     token2native,
   },
+  opts,
 ) {
+  const { gas } = {
+    gas: 8e9,
+    ...(opts ?? {}),
+  };
   await call(
     provider,
     {
@@ -153,13 +184,12 @@ export async function simulateRoundtrip(
         native2token,
         token2native,
       ]),
+      gas: quantity(gas),
     },
     {
       [trader]: {
         code: `0x${Trader["bin-runtime"]}`,
-        balance: ethers.BigNumber.from(amountNative)
-          .toHexString()
-          .replace(/^0x0*/, "0x"),
+        balance: quantity(amountNative),
       },
       [await SETTLEMENT.connect(provider).authenticator()]: {
         code: `0x${AnyoneAuthenticator["bin-runtime"]}`,
